@@ -426,12 +426,14 @@
         document.getElementById('btn-download').addEventListener('click', () => saveExcel({ download: true }));
         document.getElementById('f-filter').addEventListener('input', render);
 
-        // Автозапись в Excel: при выходе из поля (если всё заполнено)
+        // Быстрый ввод: Enter из любого поля добавляет строку и
+        // возвращает курсор в «Адрес» для следующей записи.
         ['f-address', 'f-login', 'f-phone', 'f-date'].forEach(id => {
-            const el = document.getElementById(id);
-            el.addEventListener('change', () => tryAutoAdd());
-            el.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') tryAutoAdd({ focus: true });
+            document.getElementById(id).addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    tryAutoAdd({ focus: true, notify: true });
+                }
             });
         });
 
