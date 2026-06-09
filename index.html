@@ -16,8 +16,9 @@
                 <span class="brand-text">Актуализация номеров абонентов</span>
             </div>
             <div class="topbar-actions">
-                <span id="total-count" class="badge">0 записей</span>
-                <button class="btn btn-ghost" id="btn-export" title="Скачать CSV">⬇ Экспорт</button>
+                <span id="excel-status" class="badge">Excel не привязан</span>
+                <button class="btn btn-primary" id="btn-link">📎 Привязать Excel</button>
+                <button class="btn btn-ghost" id="btn-download" title="Скачать файл Excel">⬇ Скачать</button>
             </div>
         </div>
     </header>
@@ -29,11 +30,11 @@
             <div class="subscriber-form">
                 <div class="field">
                     <label for="f-address">Адрес</label>
-                    <input type="text" id="f-address" placeholder="Например: Vinewood Blvd, 12" autocomplete="off">
+                    <input type="text" id="f-address" autocomplete="off">
                 </div>
                 <div class="field">
                     <label for="f-login">Логин</label>
-                    <input type="text" id="f-login" placeholder="Логин абонента" autocomplete="off">
+                    <input type="text" id="f-login" autocomplete="off">
                 </div>
                 <div class="field">
                     <label for="f-date">Дата</label>
@@ -41,16 +42,16 @@
                 </div>
                 <div class="field">
                     <label for="f-phone">Номер телефона</label>
-                    <input type="text" id="f-phone" placeholder="Например: 5551234" autocomplete="off">
+                    <input type="text" id="f-phone" autocomplete="off">
                 </div>
                 <div class="form-actions">
-                    <button class="btn btn-primary" id="btn-add">➕ Добавить в таблицу</button>
+                    <span class="form-hint">Заполните адрес, логин и номер — строка автоматически уйдёт в Excel (по месяцам, с цветом).</span>
                     <input type="text" id="f-filter" class="filter-input" placeholder="🔍 Поиск по адресу / логину / номеру...">
                 </div>
             </div>
         </section>
 
-        <!-- Таблица по месяцам -->
+        <!-- Предпросмотр того, что записано в Excel, по месяцам -->
         <section id="table-container">
             <div class="empty-state">Загрузка...</div>
         </section>
@@ -58,6 +59,7 @@
 
     <div id="toast-container"></div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
