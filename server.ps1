@@ -36,9 +36,32 @@ if (-not $listener) {
 $url = "http://localhost:$port/"
 Write-Host ""
 Write-Host "  Приложение запущено: $url" -ForegroundColor Green
-Write-Host "  Не закрывайте это окно во время работы. Закрытие останавливает сервер." -ForegroundColor DarkGray
+Write-Host "  Это окно — сервер. Закрытие останавливает приложение." -ForegroundColor DarkGray
 Write-Host ""
-Start-Process $url
+
+# Открываем в ОТДЕЛЬНОМ ОКНЕ как приложение (режим --app у Edge/Chrome:
+# без вкладок и адресной строки — выглядит как десктоп-программа).
+$dataDir = Join-Path $env:LOCALAPPDATA 'AbonentyApp'
+$appArgs = @("--app=$url", "--window-size=1200,820", "--user-data-dir=`"$dataDir`"")
+$browsers = @(
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+    "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+    "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+)
+$launched = $false
+foreach ($b in $browsers) {
+    if (Test-Path $b) {
+        Start-Process -FilePath $b -ArgumentList $appArgs
+        $launched = $true
+        break
+    }
+}
+if (-not $launched) {
+    # Запасной вариант: открыть в браузере по умолчанию
+    Start-Process $url
+}
 
 $rootFull = [System.IO.Path]::GetFullPath($root)
 

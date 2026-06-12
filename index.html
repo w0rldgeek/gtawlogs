@@ -30,8 +30,9 @@
                 <button class="btn btn-ghost" id="btn-install" hidden>⤓ Установить</button>
                 <button class="btn btn-primary" id="btn-open">📂 Открыть базу</button>
                 <button class="btn btn-ghost" id="btn-create">✨ Создать</button>
-                <button class="btn btn-ghost" id="btn-download" title="Сохранить файл базы">⬇ Сохранить файл</button>
-                <input type="file" id="file-input" accept=".xlsx" hidden>
+                <button class="btn btn-ghost" id="btn-excel" title="Выгрузить цветную таблицу Excel">⬇ Excel</button>
+                <button class="btn btn-ghost" id="btn-download" title="Сохранить базу (.txt)">⬇ Сохранить базу</button>
+                <input type="file" id="file-input" accept=".txt" hidden>
             </div>
         </div>
     </header>
@@ -58,7 +59,7 @@
                     <input type="text" id="f-phone" autocomplete="off">
                 </div>
                 <div class="form-actions">
-                    <span class="form-hint">Заполните поля и нажмите <kbd>Enter</kbd> — строка сразу сохранится в файл-базу.</span>
+                    <span class="form-hint">Заполните поля и нажмите <kbd>Enter</kbd> — строка сразу сохранится в текстовую базу.</span>
                     <input type="text" id="f-filter" class="filter-input" placeholder="🔍 Поиск по адресу / логину / номеру...">
                 </div>
             </div>
