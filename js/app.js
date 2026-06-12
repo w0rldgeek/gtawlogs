@@ -476,8 +476,43 @@
             document.getElementById('btn-create').textContent = '✨ Новая база';
         }
 
+        initPWA();
         tryRestore();
         render();
+    }
+
+    // ============================================================
+    // PWA — установка приложения + офлайн (service worker)
+    // ============================================================
+    function initPWA() {
+        // Регистрируем service worker (только по http/https)
+        if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(e => console.warn('SW:', e));
+            });
+        }
+
+        const btn = document.getElementById('btn-install');
+        let deferred = null;
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferred = e;
+            btn.hidden = false;
+        });
+
+        btn.addEventListener('click', async () => {
+            if (!deferred) return;
+            deferred.prompt();
+            await deferred.userChoice;
+            deferred = null;
+            btn.hidden = true;
+        });
+
+        window.addEventListener('appinstalled', () => {
+            btn.hidden = true;
+            toast('Приложение установлено', 'success');
+        });
     }
 
     if (document.readyState === 'loading') {

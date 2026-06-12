@@ -1,0 +1,17 @@
+{
+  "name": "Актуализация номеров абонентов",
+  "short_name": "Абоненты",
+  "description": "Учёт и актуализация номеров абонентов. База данных — сам .xlsx файл, без сервера и хостинга.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0b14",
+  "theme_color": "#0b0b14",
+  "lang": "ru",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
