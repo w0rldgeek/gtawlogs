@@ -16,9 +16,11 @@
                 <span class="brand-text">Актуализация номеров абонентов</span>
             </div>
             <div class="topbar-actions">
-                <span id="excel-status" class="badge">Excel не привязан</span>
-                <button class="btn btn-primary" id="btn-link">📎 Привязать Excel</button>
-                <button class="btn btn-ghost" id="btn-download" title="Скачать файл Excel">⬇ Скачать</button>
+                <span id="db-status" class="badge">База не открыта</span>
+                <button class="btn btn-primary" id="btn-open">📂 Открыть базу</button>
+                <button class="btn btn-ghost" id="btn-create">✨ Создать</button>
+                <button class="btn btn-ghost" id="btn-download" title="Сохранить файл базы">⬇ Сохранить файл</button>
+                <input type="file" id="file-input" accept=".xlsx" hidden>
             </div>
         </div>
     </header>
@@ -45,7 +47,7 @@
                     <input type="text" id="f-phone" autocomplete="off">
                 </div>
                 <div class="form-actions">
-                    <span class="form-hint">Заполните поля и нажмите <kbd>Enter</kbd> — строка уйдёт в Excel и появится ниже.</span>
+                    <span class="form-hint">Заполните поля и нажмите <kbd>Enter</kbd> — строка сразу сохранится в файл-базу.</span>
                     <input type="text" id="f-filter" class="filter-input" placeholder="🔍 Поиск по адресу / логину / номеру...">
                 </div>
             </div>

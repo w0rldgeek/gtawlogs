@@ -1,125 +1,86 @@
 /**
  * ============================================================
- * Актуализация номеров абонентов — запись прямо в Excel
+ * Актуализация номеров абонентов
+ * База данных = сам .xlsx файл (без хостинга и сервера)
  * ============================================================
- * Что заполняется в форме — автоматически уходит в .xlsx файл,
- * разбитый по месяцам (каждый месяц своего цвета).
+ * Приложение читает данные ПРЯМО из выбранного Excel-файла и
+ * пишет изменения обратно в него же (File System Access API).
+ * Файл портативен: откройте его на другом компьютере — увидите
+ * все записи. Данные разложены по месяцам, каждый своего цвета.
  *
- * В Chrome/Edge: один раз «Привязать Excel» — и дальше каждая
- * запись пишется прямо в выбранный файл (File System Access API).
- * В других браузерах: кнопка «Скачать» отдаёт готовый .xlsx.
- *
- * localStorage хранит данные между перезагрузками и служит
- * источником для пересборки файла.
+ * Браузеры без File System Access (Firefox/Safari): открытие
+ * файла через выбор + сохранение кнопкой «Сохранить файл».
  * ============================================================
  */
 
 (function () {
     'use strict';
 
-    const STORAGE_KEY = 'subscribers_v1';
-
     const MONTH_NAMES = [
         'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
         'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
     ];
-
-    // Цвета месяцев (RGB) — те же, что на странице
     const MONTH_COLORS = [
         '60A5FA', '22D3EE', '34D399', 'A3E635', 'FACC15', 'FB923C',
         'F87171', 'F472B6', 'E879F9', 'C084FC', '818CF8', '38BDF8',
     ];
+    const CACHE_KEY = 'subscribers_cache_v2';
 
-    const supportsFS = typeof window.showSaveFilePicker === 'function';
-    let fileHandle = null;   // привязанный .xlsx
+    const supportsFS = typeof window.showOpenFilePicker === 'function';
+
+    // Состояние: данные в памяти = рабочая копия базы (файла)
+    let rows = [];
+    let fileHandle = null;
     let fileName = null;
 
     // ============================================================
-    // STORE — данные (localStorage)
+    // ЧТЕНИЕ / ЗАПИСЬ EXCEL (ExcelJS)
     // ============================================================
-    const Store = {
-        all() {
-            try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-            catch { return []; }
-        },
-        save(list) { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); },
-        add(item) {
-            const list = this.all();
-            item.id = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-            list.push(item);
-            this.save(list);
-            return item;
-        },
-        remove(id) { this.save(this.all().filter(s => s.id !== id)); },
-    };
-
-    // ============================================================
-    // IndexedDB — хранение ссылки на файл между перезагрузками
-    // ============================================================
-    const HandleDB = {
-        _db() {
-            return new Promise((resolve, reject) => {
-                const req = indexedDB.open('abonenty', 1);
-                req.onupgradeneeded = () => req.result.createObjectStore('handles');
-                req.onsuccess = () => resolve(req.result);
-                req.onerror = () => reject(req.error);
-            });
-        },
-        async set(handle) {
-            try {
-                const db = await this._db();
-                const tx = db.transaction('handles', 'readwrite');
-                tx.objectStore('handles').put(handle, 'excel');
-            } catch (e) { /* not critical */ }
-        },
-        async get() {
-            try {
-                const db = await this._db();
-                return await new Promise((resolve) => {
-                    const r = db.transaction('handles', 'readonly')
-                        .objectStore('handles').get('excel');
-                    r.onsuccess = () => resolve(r.result || null);
-                    r.onerror = () => resolve(null);
-                });
-            } catch (e) { return null; }
-        },
-    };
-
-    // ============================================================
-    // EXCEL — сборка книги (ExcelJS), цвета по месяцам
-    // ============================================================
-    async function buildWorkbook() {
+    async function readRowsFromBlob(blob) {
         const wb = new ExcelJS.Workbook();
-        const rows = Store.all();
+        await wb.xlsx.load(await blob.arrayBuffer());
+        const out = [];
+        wb.eachSheet(ws => {
+            ws.eachRow((row, rowNumber) => {
+                if (rowNumber < 3) return; // 1 — заголовок месяца, 2 — шапка
+                const address = String(cellText(row.getCell(2).value)).trim();
+                const login = String(cellText(row.getCell(3).value)).trim();
+                const phone = String(cellText(row.getCell(4).value)).trim();
+                if (!address && !login && !phone) return;
+                out.push({
+                    id: uid(),
+                    date: cellDate(row.getCell(1).value),
+                    address, login, phone,
+                });
+            });
+        });
+        return out;
+    }
 
-        // Группируем по (год, месяц)
+    async function buildBlob() {
+        const wb = new ExcelJS.Workbook();
+
         const groups = new Map();
         for (const s of rows) {
-            const d = s.date ? new Date(s.date) : new Date();
-            const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
-            if (!groups.has(key)) groups.set(key, { y: d.getFullYear(), m: d.getMonth(), items: [] });
+            const d = parseISO(s.date) || new Date();
+            const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()).padStart(2, '0')}`;
+            if (!groups.has(key)) groups.set(key, { y: d.getUTCFullYear(), m: d.getUTCMonth(), items: [] });
             groups.get(key).items.push(s);
         }
-        // Если данных нет — создаём лист текущего месяца, чтобы файл был валидным
         if (groups.size === 0) {
             const now = new Date();
-            groups.set('empty', { y: now.getFullYear(), m: now.getMonth(), items: [] });
+            groups.set('e', { y: now.getUTCFullYear(), m: now.getUTCMonth(), items: [] });
         }
 
-        const keys = Array.from(groups.keys()).sort(); // хронологически
-        for (const key of keys) {
+        for (const key of Array.from(groups.keys()).sort()) {
             const g = groups.get(key);
             const argb = 'FF' + MONTH_COLORS[g.m];
             const ws = wb.addWorksheet(`${MONTH_NAMES[g.m]} ${g.y}`, {
                 properties: { tabColor: { argb } },
                 views: [{ state: 'frozen', ySplit: 2 }],
             });
+            ws.columns = [{ width: 14 }, { width: 38 }, { width: 20 }, { width: 20 }];
 
-            ws.columns = [
-                { width: 14 }, { width: 38 }, { width: 20 }, { width: 20 },
-            ];
-
-            // Заголовок месяца
             ws.mergeCells('A1:D1');
             const title = ws.getCell('A1');
             title.value = `${MONTH_NAMES[g.m]} ${g.y}`;
@@ -128,7 +89,6 @@
             title.alignment = { horizontal: 'center', vertical: 'middle' };
             ws.getRow(1).height = 24;
 
-            // Шапка
             const header = ws.getRow(2);
             ['Дата', 'Адрес', 'Логин', 'Номер телефона'].forEach((h, i) => {
                 const c = header.getCell(i + 1);
@@ -139,19 +99,14 @@
             });
             header.height = 20;
 
-            // Данные (новые сверху)
             g.items.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
             for (const s of g.items) {
-                const r = ws.addRow([
-                    s.date ? new Date(s.date) : null,
-                    s.address, s.login, s.phone,
-                ]);
+                const r = ws.addRow([parseISO(s.date), s.address, s.login, s.phone]);
                 r.getCell(1).numFmt = 'dd.mm.yyyy';
             }
 
-            // Рамки на всю заполненную область
-            const lastRow = ws.rowCount;
-            for (let rr = 2; rr <= lastRow; rr++) {
+            const last = ws.rowCount;
+            for (let rr = 2; rr <= last; rr++) {
                 for (let cc = 1; cc <= 4; cc++) {
                     ws.getCell(rr, cc).border = {
                         top: { style: 'thin', color: { argb: 'FFD0D0D0' } },
@@ -169,116 +124,140 @@
         });
     }
 
-    // Записать книгу: в привязанный файл (тихо) либо скачиванием
-    async function saveExcel(opts) {
+    // Сохранить рабочую копию обратно в файл-базу
+    async function persist(opts) {
         opts = opts || {};
-        const blob = await buildWorkbook();
-
-        if (fileHandle) {
+        if (supportsFS && fileHandle) {
             try {
+                const blob = await buildBlob();
                 const w = await fileHandle.createWritable();
                 await w.write(blob);
                 await w.close();
-                if (opts.notify) toast('Сохранено в Excel', 'success');
+                if (opts.notify) toast('Сохранено в файл', 'success');
                 return true;
             } catch (e) {
-                console.error('Excel write error:', e);
-                toast('Не удалось записать в файл — скачиваю копию', 'warning');
+                console.error('write error', e);
+                toast('Не удалось записать в файл базы', 'error');
+                return false;
             }
         }
-
-        if (opts.download || !supportsFS) {
-            downloadBlob(blob);
+        // Браузер без File System Access — держим кэш, чтобы не терять данные
+        if (!supportsFS) {
+            localStorage.setItem(CACHE_KEY, JSON.stringify(rows));
             return true;
         }
-
-        if (opts.notify) toast('Файл Excel не привязан — нажмите «Привязать Excel»', 'warning');
+        toast('База не открыта — откройте или создайте файл', 'warning');
         return false;
     }
 
-    function downloadBlob(blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName || `Абоненты_номера_${todayISO()}.xlsx`;
-        a.click();
-        URL.revokeObjectURL(url);
+    // ============================================================
+    // ОТКРЫТЬ / СОЗДАТЬ БАЗУ
+    // ============================================================
+    async function openDatabase() {
+        if (!supportsFS) { document.getElementById('file-input').click(); return; }
+        try {
+            const [handle] = await window.showOpenFilePicker({
+                types: [{ description: 'Excel', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
+            });
+            fileHandle = handle;
+            fileName = handle.name;
+            await HandleDB.set(handle);
+            const file = await handle.getFile();
+            rows = await readRowsFromBlob(file);
+            setStatus();
+            render();
+            toast(`База открыта: ${rows.length} записей`, 'success');
+        } catch (e) {
+            if (e && e.name === 'AbortError') return;
+            console.error(e);
+            toast('Не удалось открыть базу', 'error');
+        }
     }
 
-    // ============================================================
-    // Привязка Excel-файла (File System Access API)
-    // ============================================================
-    async function linkExcel() {
+    async function createDatabase() {
         if (!supportsFS) {
-            toast('Этот браузер не умеет писать в файл. Используйте «Скачать» (или Chrome/Edge).', 'warning');
+            rows = [];
+            localStorage.setItem(CACHE_KEY, '[]');
+            render();
+            toast('Новая база. Заполняйте и нажмите «Сохранить файл».', 'info');
             return;
         }
         try {
-            // Если есть сохранённая ссылка — пробуем переиспользовать
-            const stored = await HandleDB.get();
-            if (stored) {
-                const perm = await stored.requestPermission({ mode: 'readwrite' });
-                if (perm === 'granted') {
-                    fileHandle = stored;
-                    fileName = stored.name;
-                    setExcelStatus();
-                    await saveExcel({ notify: true });
-                    return;
-                }
-            }
-            // Иначе — выбираем/создаём файл
             fileHandle = await window.showSaveFilePicker({
-                suggestedName: `Абоненты_номера_${new Date().getFullYear()}.xlsx`,
-                types: [{
-                    description: 'Excel',
-                    accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] },
-                }],
+                suggestedName: `Абоненты_${new Date().getFullYear()}.xlsx`,
+                types: [{ description: 'Excel', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
             });
             fileName = fileHandle.name;
+            rows = [];
             await HandleDB.set(fileHandle);
-            setExcelStatus();
-            await saveExcel({ notify: true });
+            await persist();
+            setStatus();
+            render();
+            toast('Новая база создана', 'success');
         } catch (e) {
-            if (e && e.name === 'AbortError') return; // пользователь отменил
-            console.error('Link error:', e);
-            toast('Не удалось привязать файл', 'error');
+            if (e && e.name === 'AbortError') return;
+            console.error(e);
+            toast('Не удалось создать базу', 'error');
         }
     }
 
-    async function tryRestoreHandle() {
-        if (!supportsFS) return;
+    // Открытие файла в браузерах без File System Access (read-only загрузка)
+    async function openViaInput(file) {
+        try {
+            rows = await readRowsFromBlob(file);
+            fileName = file.name;
+            localStorage.setItem(CACHE_KEY, JSON.stringify(rows));
+            setStatus();
+            render();
+            toast(`Загружено: ${rows.length} записей. Изменения сохраняйте кнопкой «Сохранить файл».`, 'success');
+        } catch (e) {
+            console.error(e);
+            toast('Не удалось прочитать файл', 'error');
+        }
+    }
+
+    function downloadFile() {
+        buildBlob().then(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName || `Абоненты_${todayISO()}.xlsx`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+    }
+
+    async function tryRestore() {
+        if (!supportsFS) {
+            try { rows = JSON.parse(localStorage.getItem(CACHE_KEY) || '[]'); } catch { rows = []; }
+            setStatus();
+            return;
+        }
         const stored = await HandleDB.get();
-        if (!stored) return;
+        if (!stored) { setStatus(); return; }
         try {
             const perm = await stored.queryPermission({ mode: 'readwrite' });
+            fileName = stored.name;
             if (perm === 'granted') {
                 fileHandle = stored;
-                fileName = stored.name;
-            } else {
-                fileName = stored.name; // покажем имя, но потребуется повторно привязать
+                rows = await readRowsFromBlob(await stored.getFile());
+                render();
             }
-        } catch (e) { /* ignore */ }
-        setExcelStatus();
+        } catch (e) { /* потребуется повторно открыть */ }
+        setStatus();
     }
 
-    function setExcelStatus() {
-        const el = document.getElementById('excel-status');
-        if (fileHandle) {
-            el.textContent = `Excel: ${fileName}`;
-            el.classList.add('linked');
-        } else if (fileName) {
-            el.textContent = `Excel: ${fileName} (привяжите заново)`;
-            el.classList.remove('linked');
-        } else {
-            el.textContent = supportsFS ? 'Excel не привязан' : 'Режим скачивания';
-            el.classList.remove('linked');
-        }
+    function setStatus() {
+        const el = document.getElementById('db-status');
+        if (fileHandle) { el.textContent = `База: ${fileName}`; el.classList.add('linked'); }
+        else if (fileName) { el.textContent = `${fileName} (откройте заново)`; el.classList.remove('linked'); }
+        else { el.textContent = 'База не открыта'; el.classList.remove('linked'); }
     }
 
     // ============================================================
-    // Добавление записи → сразу в Excel
+    // ДОБАВЛЕНИЕ / УДАЛЕНИЕ
     // ============================================================
-    function tryAutoAdd(opts) {
+    function tryAdd(opts) {
         opts = opts || {};
         const address = document.getElementById('f-address').value.trim();
         const login = document.getElementById('f-login').value.trim();
@@ -289,9 +268,13 @@
             if (opts.notify) toast('Заполните адрес, логин и номер телефона', 'warning');
             return;
         }
+        if (supportsFS && !fileHandle) {
+            toast('Сначала откройте или создайте базу', 'warning');
+            return;
+        }
         if (!date) date = todayISO();
 
-        Store.add({ address, login, phone, date });
+        rows.push({ id: uid(), address, login, phone, date });
 
         document.getElementById('f-address').value = '';
         document.getElementById('f-login').value = '';
@@ -299,40 +282,45 @@
         if (opts.focus) document.getElementById('f-address').focus();
 
         render();
-        saveExcel({ notify: true }); // пишем прямо в файл
+        persist({ notify: true });
+    }
+
+    function removeRow(id) {
+        rows = rows.filter(s => s.id !== id);
+        render();
+        persist();
     }
 
     // ============================================================
-    // RENDER — предпросмотр того, что в Excel
+    // RENDER
     // ============================================================
     function render() {
         const container = document.getElementById('table-container');
         const filter = (document.getElementById('f-filter').value || '').trim().toLowerCase();
 
-        const allRows = Store.all();
-        let rows = allRows;
+        let view = rows;
         if (filter) {
-            rows = rows.filter(s =>
+            view = rows.filter(s =>
                 (s.address || '').toLowerCase().includes(filter) ||
                 (s.login || '').toLowerCase().includes(filter) ||
                 (s.phone || '').toLowerCase().includes(filter)
             );
         }
 
-        if (rows.length === 0) {
+        if (view.length === 0) {
+            const noDb = supportsFS && !fileHandle;
             container.innerHTML = `<div class="empty-state">${
-                allRows.length === 0
-                    ? 'Пока пусто. Заполните форму — строка уйдёт в Excel и появится здесь.'
-                    : 'Ничего не найдено по фильтру.'
+                noDb ? 'Откройте существующую базу или создайте новую — данные хранятся прямо в .xlsx файле.'
+                     : (rows.length === 0 ? 'Пусто. Заполните форму и нажмите Enter.' : 'Ничего не найдено по фильтру.')
             }</div>`;
             return;
         }
 
         const groups = new Map();
-        for (const s of rows) {
-            const d = s.date ? new Date(s.date) : new Date();
-            const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
-            if (!groups.has(key)) groups.set(key, { year: d.getFullYear(), month: d.getMonth(), items: [] });
+        for (const s of view) {
+            const d = parseISO(s.date) || new Date();
+            const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth()).padStart(2, '0')}`;
+            if (!groups.has(key)) groups.set(key, { year: d.getUTCFullYear(), month: d.getUTCMonth(), items: [] });
             groups.get(key).items.push(s);
         }
         const sortedKeys = Array.from(groups.keys()).sort().reverse();
@@ -340,7 +328,6 @@
         container.innerHTML = sortedKeys.map(key => {
             const g = groups.get(key);
             g.items.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-            const monthLabel = `${MONTH_NAMES[g.month]} ${g.year}`;
             const rowsHtml = g.items.map(s => `
                 <tr>
                     <td>${s.date ? formatDate(s.date) : '—'}</td>
@@ -355,7 +342,7 @@
             return `
                 <div class="month-card month-${g.month}">
                     <div class="month-card-header">
-                        <h3>${monthLabel}</h3>
+                        <h3>${MONTH_NAMES[g.month]} ${g.year}</h3>
                         <span class="badge month-badge">${g.items.length}</span>
                     </div>
                     <div class="table-container">
@@ -378,23 +365,69 @@
 
         container.querySelectorAll('.sub-delete').forEach(btn => {
             btn.addEventListener('click', () => {
-                if (confirm('Удалить запись абонента?')) {
-                    Store.remove(btn.dataset.id);
-                    toast('Удалено', 'success');
-                    render();
-                    saveExcel();
-                }
+                if (confirm('Удалить запись?')) removeRow(btn.dataset.id);
             });
         });
     }
 
     // ============================================================
+    // МАЛАЯ БАЗА ДЛЯ ССЫЛКИ НА ФАЙЛ (IndexedDB)
+    // ============================================================
+    const HandleDB = {
+        _db() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open('abonenty', 1);
+                req.onupgradeneeded = () => req.result.createObjectStore('handles');
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        },
+        async set(h) { try { const db = await this._db(); db.transaction('handles', 'readwrite').objectStore('handles').put(h, 'db'); } catch {} },
+        async get() {
+            try {
+                const db = await this._db();
+                return await new Promise(res => {
+                    const r = db.transaction('handles', 'readonly').objectStore('handles').get('db');
+                    r.onsuccess = () => res(r.result || null);
+                    r.onerror = () => res(null);
+                });
+            } catch { return null; }
+        },
+    };
+
+    // ============================================================
     // UTILS
     // ============================================================
+    function uid() { return Date.now() + '-' + Math.random().toString(36).slice(2, 8); }
     function todayISO() { return new Date().toISOString().slice(0, 10); }
+    function parseISO(iso) {
+        if (!iso) return null;
+        const [y, m, d] = String(iso).split('-').map(Number);
+        if (!y || !m || !d) return null;
+        return new Date(Date.UTC(y, m - 1, d));
+    }
     function formatDate(iso) {
-        const d = new Date(iso);
-        return isNaN(d) ? iso : d.toLocaleDateString('ru-RU');
+        const [y, m, d] = String(iso).split('-');
+        return (y && m && d) ? `${d}.${m}.${y}` : iso;
+    }
+    function cellText(v) {
+        if (v == null) return '';
+        if (v instanceof Date) return v;
+        if (typeof v === 'object') {
+            if (v.richText) return v.richText.map(t => t.text).join('');
+            if (v.text != null) return v.text;
+            if (v.result != null) return v.result;
+            return '';
+        }
+        return v;
+    }
+    function cellDate(v) {
+        if (v instanceof Date) {
+            return `${v.getUTCFullYear()}-${String(v.getUTCMonth() + 1).padStart(2, '0')}-${String(v.getUTCDate()).padStart(2, '0')}`;
+        }
+        if (v == null || v === '') return '';
+        const d = new Date(v);
+        return isNaN(d) ? '' : `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
     }
     function escapeHtml(text) {
         if (text == null) return '';
@@ -422,23 +455,28 @@
     function init() {
         document.getElementById('f-date').value = todayISO();
 
-        document.getElementById('btn-link').addEventListener('click', linkExcel);
-        document.getElementById('btn-download').addEventListener('click', () => saveExcel({ download: true }));
+        document.getElementById('btn-open').addEventListener('click', openDatabase);
+        document.getElementById('btn-create').addEventListener('click', createDatabase);
+        document.getElementById('btn-download').addEventListener('click', downloadFile);
         document.getElementById('f-filter').addEventListener('input', render);
 
-        // Быстрый ввод: Enter из любого поля добавляет строку и
-        // возвращает курсор в «Адрес» для следующей записи.
+        const fi = document.getElementById('file-input');
+        fi.addEventListener('change', () => { if (fi.files[0]) openViaInput(fi.files[0]); fi.value = ''; });
+
         ['f-address', 'f-login', 'f-phone', 'f-date'].forEach(id => {
             document.getElementById(id).addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    tryAutoAdd({ focus: true, notify: true });
-                }
+                if (e.key === 'Enter') { e.preventDefault(); tryAdd({ focus: true, notify: true }); }
             });
         });
 
-        setExcelStatus();
-        tryRestoreHandle();
+        // Кнопка «Сохранить файл» нужна только без File System Access
+        if (supportsFS) document.getElementById('btn-download').hidden = true;
+        else {
+            document.getElementById('btn-open').textContent = '📂 Открыть файл';
+            document.getElementById('btn-create').textContent = '✨ Новая база';
+        }
+
+        tryRestore();
         render();
     }
 
