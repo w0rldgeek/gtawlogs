@@ -1,5 +1,7 @@
 @echo off
-rem Запуск приложения «Абоненты» в отдельном окне.
-rem Сервер стартует свёрнутым; приложение открывается как десктоп-окно.
-start "Abonenty server" /min powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0server.ps1"
-exit
+title Abonenty
+rem Run the server in THIS window so any error stays visible.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0server.ps1"
+echo.
+echo If no app window opened, screenshot any red text above and send it.
+pause
